@@ -10,8 +10,9 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, currencySymbol = '$', userLocation }) => {
   const [aiQuery, setAiQuery] = useState('');
-  const [aiResult, setAiResult] = useState<{ text: string, links: any[] } | null>(null);
+  const [aiResult, setAiResult] = useState<{ text: string, links: any[], verified: boolean } | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState('');
 
   const handleAiSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,40 +20,59 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, currencySymbol = '$',
 
     setIsAiLoading(true);
     setAiResult(null);
+    setLoadingStep('Initializing Dispatch AI...');
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      setLoadingStep('Searching Google Maps...');
+      
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: aiQuery,
         config: {
-          systemInstruction: `You are a logistics assistant for Window Wash Pro. Help dispatch crews and check locations. If searching for UK addresses/postcodes, use the Google Maps tool to verify. Always prioritize accuracy for navigation. If the user provides a UK postcode like 'SW1A 1AA', look it up directly.`,
+          systemInstruction: `You are the Window Wash Pro Smart Dispatch Assistant. 
+Focus: Logistics, Location Verification, and Crew Assignment.
+Rules:
+1. For ANY address or UK postcode (e.g. SW1, EC2, M1), ALWAYS use googleMaps to verify.
+2. Identify the specific UK District/Town from the map data.
+3. Determine "Dispatch Readiness":
+   - VERIFIED: Exact match found.
+   - AMBIGUOUS: Multiple matches or partial address.
+   - UNKNOWN: No map data found.
+4. Output a helpful summary for a dispatcher. Mention nearby landmarks or traffic if available in map results.`,
           tools: [{ googleMaps: {} }],
           toolConfig: userLocation ? {
             retrievalConfig: {
-              latLng: {
-                latitude: userLocation.lat,
-                longitude: userLocation.lng
-              }
+              latLng: { latitude: userLocation.lat, longitude: userLocation.lng }
             }
           } : undefined
         },
       });
 
-      const text = response.text || "I couldn't find specific details for that location.";
-      const links = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const text = response.text || "No dispatch data found for this query.";
+      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const hasMapMatch = chunks.some(chunk => chunk.maps);
       
-      setAiResult({ text, links });
+      setAiResult({ 
+        text, 
+        links: chunks,
+        verified: hasMapMatch
+      });
     } catch (err) {
       console.error("AI Search Error:", err);
-      setAiResult({ text: "Sorry, I had trouble reaching the maps service. Please try again.", links: [] });
+      setAiResult({ 
+        text: "Logistics system offline. Please verify the address manually.", 
+        links: [],
+        verified: false
+      });
     } finally {
       setIsAiLoading(false);
+      setLoadingStep('');
     }
   };
 
   return (
-    <div className="flex flex-col pb-24">
+    <div className="flex flex-col pb-24 font-sans">
       {/* Top App Bar */}
       <div className="flex items-center bg-white dark:bg-background-dark p-4 pb-2 justify-between sticky top-0 z-50 border-b border-slate-100 dark:border-slate-800">
         <div className="flex size-10 shrink-0 items-center">
@@ -62,146 +82,138 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, currencySymbol = '$',
           />
         </div>
         <div className="flex flex-col flex-1 px-3">
-          <h2 className="text-[#0d141b] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em]">Owner Dashboard</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Monday, Oct 23</p>
+          <h2 className="text-[#0d141b] dark:text-white text-lg font-bold leading-tight">Window Wash Pro</h2>
+          <p className="text-[10px] font-black uppercase text-primary tracking-widest">Smart Logistics v2.5</p>
         </div>
-        <div className="flex w-12 items-center justify-end">
-          <button 
-            onClick={() => onNavigate('settings')}
-            className="relative flex size-10 cursor-pointer items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-[#0d141b] dark:text-white"
-          >
-            <span className="material-symbols-outlined text-2xl">settings</span>
-          </button>
-        </div>
+        <button onClick={() => onNavigate('settings')} className="size-10 flex items-center justify-center rounded-full bg-slate-50 dark:bg-slate-800">
+          <span className="material-symbols-outlined text-slate-500">settings</span>
+        </button>
       </div>
 
-      {/* Smart Dispatch AI Search */}
-      <div className="px-4 pt-4">
+      {/* AI Dispatch Search */}
+      <div className="px-4 pt-6">
         <form onSubmit={handleAiSearch} className="relative">
-          <div className={`absolute left-4 top-1/2 -translate-y-1/2 flex items-center justify-center transition-colors ${isAiLoading ? 'text-primary animate-pulse' : 'text-slate-400'}`}>
-            <span className="material-symbols-outlined text-xl">{isAiLoading ? 'auto_awesome' : 'smart_toy'}</span>
+          <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-all ${isAiLoading ? 'text-primary' : 'text-slate-400'}`}>
+            <span className={`material-symbols-outlined ${isAiLoading ? 'animate-spin' : ''}`}>
+              {isAiLoading ? 'sync' : 'search_check'}
+            </span>
           </div>
           <input 
             type="text" 
             value={aiQuery}
             onChange={(e) => setAiQuery(e.target.value)}
-            placeholder="Search UK postcode or nearby jobs..."
-            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent dark:text-white shadow-sm"
+            placeholder="Verify UK Postcode or Customer Site..."
+            className="w-full bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-sm font-semibold focus:ring-4 focus:ring-primary/10 focus:border-primary dark:text-white shadow-xl shadow-slate-200/40 dark:shadow-none"
           />
-          <button 
-            type="submit" 
-            className="absolute right-3 top-1/2 -translate-y-1/2 bg-primary text-white p-2 rounded-xl active:scale-95 transition-transform"
-          >
-            <span className="material-symbols-outlined text-xl leading-none">arrow_forward</span>
-          </button>
         </form>
 
-        {aiResult && (
-          <div className="mt-3 p-4 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-2xl animate-in slide-in-from-top-2 duration-300">
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-primary text-xl mt-0.5">info</span>
-              <div className="flex-1">
-                <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
-                  {aiResult.text}
-                </p>
-                {aiResult.links.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {aiResult.links.map((chunk, i) => chunk.maps && (
-                      <a 
-                        key={i} 
-                        href={chunk.maps.uri} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs font-bold text-primary bg-white dark:bg-slate-800 p-2 rounded-lg border border-primary/10 hover:bg-primary/5 transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-sm">map</span>
-                        View on Google Maps: {chunk.maps.title}
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
+        {isAiLoading && (
+          <div className="mt-3 px-2 flex items-center gap-2">
+            <div className="flex gap-1">
+              <div className="size-1 bg-primary rounded-full animate-bounce"></div>
+              <div className="size-1 bg-primary rounded-full animate-bounce [animation-delay:0.2s]"></div>
+              <div className="size-1 bg-primary rounded-full animate-bounce [animation-delay:0.4s]"></div>
             </div>
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{loadingStep}</p>
+          </div>
+        )}
+
+        {aiResult && (
+          <div className="mt-4 p-5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl shadow-xl animate-in slide-in-from-top-4 duration-500">
+            <div className="flex justify-between items-start mb-4">
+               <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${aiResult.verified ? 'bg-green-50 text-green-600 border-green-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                 {aiResult.verified ? 'Location Verified' : 'Ambiguous Location'}
+               </div>
+               <button onClick={() => setAiResult(null)} className="text-slate-300 hover:text-slate-500"><span className="material-symbols-outlined text-sm">close</span></button>
+            </div>
+            
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed font-medium mb-4">
+              {aiResult.text}
+            </p>
+
+            {aiResult.links.map((chunk, i) => chunk.maps && (
+              <a 
+                key={i} 
+                href={chunk.maps.uri} 
+                target="_blank" 
+                className="flex items-center gap-3 bg-slate-50 dark:bg-slate-900 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 hover:bg-primary/5 hover:border-primary/20 transition-all group"
+              >
+                <div className="size-10 bg-white dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary shadow-sm border border-slate-100 dark:border-slate-700">
+                  <span className="material-symbols-outlined">directions</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-tighter">View on Google Maps</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{chunk.maps.title}</p>
+                </div>
+                <span className="material-symbols-outlined text-slate-300 group-hover:text-primary">open_in_new</span>
+              </a>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Quick Stats */}
-      <div className="flex flex-wrap gap-3 p-4">
-        <div className="flex min-w-[160px] flex-1 flex-col gap-1 rounded-xl p-4 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-sm">
-          <p className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wider">Today's Revenue</p>
-          <p className="text-primary tracking-tight text-2xl font-bold leading-tight">{currencySymbol}1,240</p>
-          <div className="flex items-center gap-1">
-            <span className="material-symbols-outlined text-sm text-green-600 font-bold">trending_up</span>
-            <p className="text-green-600 text-xs font-bold leading-normal">+12%</p>
+      {/* Analytics Summary */}
+      <div className="grid grid-cols-2 gap-3 p-4">
+        <div className="bg-white dark:bg-slate-800 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+          <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Daily Revenue</p>
+          <p className="text-2xl font-black dark:text-white">{currencySymbol}1,240</p>
+          <div className="flex items-center gap-1 text-green-500 mt-1">
+             <span className="material-symbols-outlined text-xs">trending_up</span>
+             <span className="text-[10px] font-bold">+12% vs yesterday</span>
           </div>
         </div>
-        <div 
-          onClick={() => onNavigate('invoice')}
-          className="flex min-w-[160px] flex-1 flex-col gap-1 rounded-xl p-4 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-sm cursor-pointer active:scale-95 transition-transform"
-        >
-          <p className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wider">Pending Quotes</p>
-          <p className="text-[#0d141b] dark:text-white tracking-tight text-2xl font-bold leading-tight">8</p>
-          <div className="flex items-center gap-1">
-            <span className="material-symbols-outlined text-sm text-amber-500 font-bold">hourglass_empty</span>
-            <p className="text-amber-500 text-xs font-bold leading-normal">Needs Review</p>
+        <div className="bg-white dark:bg-slate-800 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+          <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Active Quotes</p>
+          <p className="text-2xl font-black dark:text-white">08</p>
+          <div className="flex items-center gap-1 text-amber-500 mt-1">
+             <span className="material-symbols-outlined text-xs">hourglass_top</span>
+             <span className="text-[10px] font-bold">Needs followup</span>
           </div>
-        </div>
-        <div 
-          onClick={() => onNavigate('crews')}
-          className="flex min-w-full flex-col gap-1 rounded-xl p-4 bg-primary text-white shadow-md cursor-pointer active:scale-[0.99] transition-all"
-        >
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-white/80 text-xs font-medium uppercase tracking-wider">Workforce</p>
-              <p className="tracking-tight text-2xl font-bold leading-tight">5 Crews Live</p>
-            </div>
-            <span className="material-symbols-outlined text-3xl opacity-40">local_shipping</span>
-          </div>
-          <p className="text-white/70 text-xs mt-1">Tap to see real-time field status</p>
         </div>
       </div>
 
-      {/* Crew Locations Map Section */}
-      <div className="px-4 py-2">
-        <div className="flex justify-between items-end mb-3">
-          <h3 className="text-[#0d141b] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em]">Field Map</h3>
-          <button onClick={() => onNavigate('crews')} className="text-primary text-sm font-semibold">Track All</button>
-        </div>
-        <div className="relative group">
+      {/* Field Operations Map Placeholder */}
+      <div className="px-4 pb-4">
+        <div className="relative group cursor-pointer" onClick={() => onNavigate('crews')}>
           <div 
-            className="w-full bg-center bg-no-repeat aspect-video bg-cover rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden" 
+            className="w-full aspect-[2/1] bg-center bg-no-repeat bg-cover rounded-3xl border border-slate-200 dark:border-slate-800 shadow-lg relative overflow-hidden" 
             style={{ backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuA7koKeWgsY0-t76uWlNZlM89kJvD-1Dyh9MLXzYYwzooGKry8JkFY_PtR0fbf8EE-XjwOCA7e-pO3GDal8Og9OxtXVTO62jbroR-CN3irtF3gAmbeDyuyN3FIm1TdGCQ0MRqULAFkOd47q45kodlmgpQDQD9HbMlhtHzitf7FRcNiGgt-cwmaZSvyMcNZ48UtINYZaIz-CzwQrBCvNsbDp-EbU7p0816TwIWDlH1KdFmcvFFlPWOWW8HqeIAHpTIV48B5moh2Nz8Cm")' }}
           >
-            <div className="absolute top-1/4 left-1/3 flex flex-col items-center">
-              <div className="bg-primary p-1 rounded-full shadow-lg border-2 border-white animate-bounce">
-                <span className="material-symbols-outlined text-white text-xs">local_shipping</span>
-              </div>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+            <div className="absolute bottom-4 left-4">
+              <p className="text-white text-sm font-bold flex items-center gap-2">
+                <span className="size-2 bg-green-500 rounded-full animate-ping"></span>
+                5 Crews Live
+              </p>
+            </div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/90 dark:bg-slate-900/90 backdrop-blur px-4 py-2 rounded-2xl shadow-xl flex items-center gap-2 border border-white/20">
+              <span className="material-symbols-outlined text-primary">explore</span>
+              <span className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-white">Track Operations</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Upcoming Jobs Section */}
-      <div className="px-4 py-4">
-        <div className="flex justify-between items-end mb-4">
-          <h3 className="text-[#0d141b] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em]">Upcoming Jobs</h3>
-          <span className="text-slate-500 text-xs">4 jobs remaining</span>
+      {/* Upcoming Queue */}
+      <div className="px-4 py-2 space-y-4">
+        <div className="flex justify-between items-end">
+          <h3 className="text-lg font-black dark:text-white tracking-tight">Today's Schedule</h3>
+          <button onClick={() => onNavigate('schedule')} className="text-primary text-xs font-black uppercase tracking-widest">Full View</button>
         </div>
         <div className="space-y-3">
           <JobCard 
             title="Smith Residence" 
             address="124 Oak St, North Loop" 
             time="02:00 PM" 
-            tags={['Exterior', 'East Side Crew']} 
+            tags={['Exterior']} 
             status="In Progress"
             onClick={() => onNavigate('jobDetails', 'job1')}
           />
           <JobCard 
-            title="Tech Hub Office Park" 
-            address="Suite 400, Innovation Blvd" 
+            title="Tech Hub Office" 
+            address="Innovation Blvd, UK EC1" 
             time="03:30 PM" 
-            tags={['Gutter Cleaning']} 
+            tags={['Deep Clean']} 
             status="Confirmed"
             onClick={() => onNavigate('jobDetails', 'job2')}
           />
@@ -211,52 +223,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, currencySymbol = '$',
   );
 };
 
-interface JobCardProps {
-  title: string;
-  address: string;
-  time: string;
-  tags: string[];
-  status?: string;
-  onClick: () => void;
-}
-
-const JobCard: React.FC<JobCardProps> = ({ title, address, time, tags, status, onClick }) => {
-  const [hour, period] = time.split(' ');
-  const getStatusColor = (s: string) => {
-    if (s === 'In Progress') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
-    if (s === 'Confirmed') return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300';
-    return 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400';
-  };
-
-  return (
-    <div 
-      onClick={onClick}
-      className="flex items-center gap-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm cursor-pointer active:scale-98 transition-all"
-    >
-      <div className="flex flex-col items-center justify-center size-14 rounded-lg shrink-0 bg-slate-50 dark:bg-slate-900 text-primary">
-        <span className="text-xs font-bold">{hour}</span>
-        <span className="text-[10px] text-slate-400">{period}</span>
+const JobCard: React.FC<{ title: string; address: string; time: string; tags: string[]; status: string; onClick: () => void }> = ({ title, address, time, tags, status, onClick }) => (
+  <div 
+    onClick={onClick}
+    className="flex items-center gap-4 p-4 bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm active:scale-98 transition-all"
+  >
+    <div className="flex flex-col items-center justify-center size-14 rounded-2xl shrink-0 bg-slate-50 dark:bg-slate-900 text-primary border border-slate-100 dark:border-slate-800">
+      <span className="text-xs font-black uppercase tracking-tighter">{time.split(' ')[0]}</span>
+      <span className="text-[9px] text-slate-400 font-bold uppercase">{time.split(' ')[1]}</span>
+    </div>
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-2 mb-0.5">
+        <h4 className="text-sm font-black dark:text-white truncate">{title}</h4>
+        <span className={`px-2 py-0.5 text-[8px] font-black uppercase rounded bg-primary/10 text-primary`}>{status}</span>
       </div>
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="text-sm font-bold text-[#0d141b] dark:text-white truncate">{title}</h4>
-          {status && (
-            <span className={`px-2 py-0.5 text-[9px] font-black uppercase rounded-md tracking-tighter ${getStatusColor(status)}`}>
-              {status}
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{address}</p>
-        <div className="flex gap-2 mt-2">
-          {tags.map(tag => (
-            <span key={tag} className="px-2 py-0.5 text-[10px] font-bold rounded-full uppercase bg-blue-50 dark:bg-blue-900/30 text-primary">
-              {tag}
-            </span>
-          ))}
-        </div>
+      <p className="text-[11px] text-slate-400 truncate font-medium mb-2">{address}</p>
+      <div className="flex gap-1.5">
+        {tags.map(tag => (
+          <span key={tag} className="px-2 py-0.5 text-[8px] font-black uppercase rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+            {tag}
+          </span>
+        ))}
       </div>
     </div>
-  );
-};
+    <button className="size-10 flex items-center justify-center rounded-full bg-slate-50 dark:bg-slate-800 text-primary hover:bg-primary/10">
+      <span className="material-symbols-outlined">near_me</span>
+    </button>
+  </div>
+);
 
 export default Dashboard;

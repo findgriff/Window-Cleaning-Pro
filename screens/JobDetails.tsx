@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 
 interface JobDetailsProps {
@@ -16,6 +15,17 @@ const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onBack }) => {
 
   const toggleItem = (id: number) => {
     setItems(items.map(item => item.id === id ? { ...item, completed: !item.completed } : item));
+  };
+
+  const openMap = () => {
+    const address = "123 Sunshine Lane, Silicon Valley, CA 94025";
+    const encodedAddress = encodeURIComponent(address);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const url = isIOS 
+      ? `maps://?q=${encodedAddress}` 
+      : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+    
+    window.open(url, '_blank');
   };
 
   const totalItems = items.length;
@@ -63,7 +73,10 @@ const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onBack }) => {
                 style={{ backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuBWifyHvCBm_vmQLNJOFxrHSK57Z0Y8iS-dkgV9lFLtrQeCrwkT1SKulICHXSsOb4AUGmrTO3HyxJ028UFVQc-a2Awy0HTRBInZsyyQewaO3NyVd7Y-PSrtg90Dnn0wVSgQtKkGu2BTg0a3dAoqQqiOwz0pTCGO_HUkKFXJUeguU9v8E0ZP--WAXSuqqO2JSQEbObJXvcQZL7RcdJmHyVPYkraPHnkqvZxw6hscmW7aUP-IrzuvLOHLrB2Xqt1jLuv7MdwXttIf8qIM")' }}
               />
             </div>
-            <button className="flex w-full cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 bg-primary text-white gap-2 text-base font-bold shadow-lg shadow-primary/30 active:scale-95 transition-transform">
+            <button 
+              onClick={openMap}
+              className="flex w-full cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 bg-primary text-white gap-2 text-base font-bold shadow-lg shadow-primary/30 active:scale-95 transition-transform"
+            >
               <span className="material-symbols-outlined">near_me</span>
               <span className="truncate">Navigate to Site</span>
             </button>

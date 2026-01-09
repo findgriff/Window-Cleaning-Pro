@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Screen, Customer } from '../types';
 
@@ -303,7 +302,7 @@ const CustomerItem: React.FC<{ customer: Customer; onNotesClick: () => void; onC
       style={{ backgroundImage: `url("${customer.avatar}")` }}
     />
     <div className="flex-1 min-w-0">
-      <div className="flex items-center gap-2 mb-1" onClick={onClick}>
+      <div className="flex items-center gap-2 mb-0.5" onClick={onClick}>
         <h3 className="text-base font-bold dark:text-white truncate">{customer.name}</h3>
         {customer.status === 'OVERDUE' && (
           <span className="bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter">Overdue</span>
@@ -312,9 +311,17 @@ const CustomerItem: React.FC<{ customer: Customer; onNotesClick: () => void; onC
           <span className="bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter">Lead</span>
         )}
       </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400 truncate" onClick={onClick}>{customer.address}</p>
       
-      <div className="mt-3 flex items-center gap-2">
+      <div className="flex flex-col mb-2" onClick={onClick}>
+        <p className="text-[11px] text-primary dark:text-blue-400 font-semibold truncate leading-tight">
+          {customer.email}
+        </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+          {customer.address}
+        </p>
+      </div>
+      
+      <div className="flex items-center gap-2">
         <button 
           onClick={(e) => { e.stopPropagation(); onNotesClick(); }}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-all border ${
