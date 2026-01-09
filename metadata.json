@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Window Wash Pro Dashboard",
+  "description": "A high-performance business management dashboard for window cleaning services, featuring crew tracking, scheduling, invoicing, and customer CRM.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
