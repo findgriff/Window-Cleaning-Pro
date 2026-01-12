@@ -10,9 +10,9 @@ const BottomNav: React.FC<BottomNavProps> = ({ currentScreen, onNavigate }) => {
   const navItems = [
     { id: 'dashboard' as Screen, label: 'Home', icon: 'dashboard' },
     { id: 'schedule' as Screen, label: 'Schedule', icon: 'calendar_month' },
-    { id: 'crews' as Screen, label: 'Crews', icon: 'local_shipping' },
-    { id: 'customers' as Screen, label: 'CRM', icon: 'person_search' },
+    { id: 'customers' as Screen, label: 'CRM', icon: 'group' },
     { id: 'invoice' as Screen, label: 'Invoices', icon: 'payments' },
+    { id: 'reports' as Screen, label: 'Reports', icon: 'analytics' },
   ];
 
   return (

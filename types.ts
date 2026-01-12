@@ -1,4 +1,4 @@
-export type Screen = 'dashboard' | 'schedule' | 'jobDetails' | 'invoice' | 'customers' | 'settings' | 'customerProfile' | 'crews';
+export type Screen = 'dashboard' | 'schedule' | 'jobDetails' | 'invoice' | 'customers' | 'settings' | 'customerProfile' | 'crews' | 'reports';
 
 export interface Job {
   id: string;

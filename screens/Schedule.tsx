@@ -16,6 +16,7 @@ const MOCK_JOBS_DATA: Job[] = [
     status: 'upcoming',
     isRecurring: true,
     recurrencePattern: 'weekly',
+    notes: 'Gate code is 1234. Customer requested back windows first.',
     thumbnail: "https://lh3.googleusercontent.com/aida-public/AB6AXuBPruBljxeojnUy13ljwJtCENuevq_qFJGirOZfEsCukoeu08gQ8YYVUyIC-FXdZvgpSIF6k3O3dpHOO__RhJDD6nBCCS3myudW_fd4hvFd13I2tvz1m_-ukRAseDZWUmqSUw-NKfkWyXpjT6UrUVTlT9gBzlrjHN9e8gf-qOc2buz13AT-LeFHWPeFnFzb_cQ7TNafbZvcoQ7fH4khiugVgmY8aqgNqgqY6djXB-NRfMPcXMx1VzGBRY79H5dU82TAYe7-qOh8gA3g"
   },
   {
@@ -79,7 +80,7 @@ const Schedule: React.FC<ScheduleProps> = ({ onNavigate }) => {
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <span className="material-symbols-outlined text-primary text-2xl font-black">event_note</span>
-            <h1 className="text-xl font-black tracking-tight">Schedule</h1>
+            <h1 className="text-xl font-black tracking-tight dark:text-white">Schedule</h1>
           </div>
           <button 
             onClick={() => setFilterMode(filterMode === 'all' ? 'recurring' : 'all')}
@@ -112,7 +113,10 @@ const Schedule: React.FC<ScheduleProps> = ({ onNavigate }) => {
                 <p className="text-[10px] font-black uppercase text-slate-400 leading-none">{job.time.split(' ')[0]}</p>
                 <p className="text-[8px] font-bold text-slate-300 uppercase">{job.time.split(' ')[1]}</p>
               </div>
-              <div className="flex-1 bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden active:scale-[0.99] transition-all">
+              <div 
+                onClick={() => onNavigate('jobDetails', job.id)}
+                className="flex-1 bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden active:scale-[0.99] transition-all cursor-pointer"
+              >
                 {job.isRecurring && (
                   <div className={`absolute top-0 right-0 px-4 py-1 rounded-bl-2xl text-[8px] font-black uppercase tracking-widest text-white ${
                     job.recurrencePattern === 'daily' ? 'bg-blue-500' : 
@@ -133,12 +137,18 @@ const Schedule: React.FC<ScheduleProps> = ({ onNavigate }) => {
                 <div className="flex items-center gap-4 mt-2">
                   <div className="flex items-center gap-1">
                     <span className="material-symbols-outlined text-xs text-primary">groups</span>
-                    <span className="text-[10px] font-black text-slate-500 uppercase">{job.crew}</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">{job.crew}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="material-symbols-outlined text-xs text-primary">timer</span>
-                    <span className="text-[10px] font-black text-slate-500 uppercase">Est. 2h</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">Est. 2h</span>
                   </div>
+                  {job.notes && (
+                    <div className="flex items-center gap-1 ml-auto">
+                      <span className="material-symbols-outlined text-xs text-amber-500">sticky_note_2</span>
+                      <span className="text-[8px] font-black text-amber-500 uppercase tracking-tighter">Notes</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -7,6 +7,7 @@ import Invoice from './screens/Invoice';
 import Customers from './screens/Customers';
 import CustomerProfile from './screens/CustomerProfile';
 import Crews from './screens/Crews';
+import Reports from './screens/Reports';
 import Settings from './screens/Settings';
 import BottomNav from './components/BottomNav';
 
@@ -73,6 +74,8 @@ const App: React.FC = () => {
         return <CustomerProfile customerId={selectedId} onBack={() => navigateTo('customers')} currencySymbol={currencySymbol} />;
       case 'crews':
         return <Crews onBack={() => navigateTo('dashboard')} />;
+      case 'reports':
+        return <Reports onBack={() => navigateTo('dashboard')} currencySymbol={currencySymbol} />;
       case 'settings':
         return <Settings onBack={() => navigateTo('dashboard')} darkMode={darkMode} setDarkMode={setDarkMode} />;
       default:

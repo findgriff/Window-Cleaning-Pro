@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface InvoiceProps {
   onBack: () => void;
@@ -8,17 +8,28 @@ interface InvoiceProps {
 
 type InvoiceTemplate = 'Simple' | 'Detailed' | 'Service Summary';
 
+// Fix: Defined the missing templates array for the picker modal
+const templates: { name: InvoiceTemplate; icon: string; desc: string }[] = [
+  { name: 'Detailed', icon: 'description', desc: 'Full breakdown with line items and descriptions' },
+  { name: 'Simple', icon: 'view_agenda', desc: 'Compact view showing totals and basic info' },
+  { name: 'Service Summary', icon: 'summarize', desc: 'Brief list of services and final price' },
+];
+
 const Invoice: React.FC<InvoiceProps> = ({ onBack, currencySymbol = '$' }) => {
   const [depositPaid, setDepositPaid] = useState(true);
   const [currentTemplate, setCurrentTemplate] = useState<InvoiceTemplate>('Detailed');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const templates: { name: InvoiceTemplate; icon: string; desc: string }[] = [
-    { name: 'Simple', icon: 'article', desc: 'Minimalist layout focusing on the bottom line.' },
-    { name: 'Detailed', icon: 'list_alt', desc: 'Full breakdown of items, descriptions, and icons.' },
-    { name: 'Service Summary', icon: 'summarize', desc: 'Condensed view for quick service overviews.' },
-  ];
+  // Auto-clear toast
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const handleTemplateSelect = (template: InvoiceTemplate) => {
     setCurrentTemplate(template);
@@ -26,8 +37,65 @@ const Invoice: React.FC<InvoiceProps> = ({ onBack, currencySymbol = '$' }) => {
     setIsMenuOpen(false);
   };
 
+  const handleExportPDF = () => {
+    setIsMenuOpen(false);
+    setIsExportingPDF(true);
+    
+    // Simulate PDF generation delay
+    setTimeout(() => {
+      setIsExportingPDF(false);
+      
+      // Create a mock PDF file (actually a text file for this demo)
+      const mockContent = `
+        INVOICE #INV-2023
+        Date: October 24, 2023
+        Client: John Doe
+        
+        SERVICES:
+        - Exterior Window Cleaning: ${currencySymbol}150.00
+        - Screen Deep Clean: ${currencySymbol}45.00
+        - Track Vacuuming: ${currencySymbol}30.00
+        
+        TOTAL: ${currencySymbol}243.00
+        Status: DRAFT
+      `;
+      
+      const blob = new Blob([mockContent], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'ClearView_Invoice_INV-2023.pdf');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      setToast('Invoice exported as PDF successfully');
+    }, 1500);
+  };
+
   return (
-    <div className="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 min-h-screen">
+    <div className="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 min-h-screen relative overflow-x-hidden">
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-[400px] animate-in slide-in-from-top-4 fade-in duration-300">
+          <div className="bg-slate-900/95 dark:bg-white/95 backdrop-blur text-white dark:text-slate-900 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 dark:border-slate-200">
+            <span className="material-symbols-outlined text-green-400">check_circle</span>
+            <span className="text-xs font-bold truncate">{toast}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Global Export Loader */}
+      {isExportingPDF && (
+        <div className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-[2px] flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4 border border-slate-100 dark:border-slate-700">
+            <span className="material-symbols-outlined text-primary text-4xl animate-spin">sync</span>
+            <p className="text-sm font-black uppercase tracking-widest text-primary">Generating PDF...</p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-[480px] mx-auto min-h-screen flex flex-col shadow-xl bg-white dark:bg-[#1a242f] relative">
         {/* TopAppBar */}
         <div className="flex items-center bg-white dark:bg-[#1a242f] p-4 pb-2 justify-between border-b dark:border-slate-800 sticky top-0 z-50">
@@ -55,12 +123,15 @@ const Invoice: React.FC<InvoiceProps> = ({ onBack, currencySymbol = '$' }) => {
                     <span className="material-symbols-outlined text-primary text-xl">Dashboard_Customize</span>
                     <span className="text-sm font-semibold">Templates</span>
                   </button>
-                  <button className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors border-t border-slate-50 dark:border-slate-700">
+                  <button 
+                    onClick={handleExportPDF}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors border-t border-slate-50 dark:border-slate-700"
+                  >
                     <span className="material-symbols-outlined text-slate-400 text-xl">picture_as_pdf</span>
                     <span className="text-sm font-semibold">Export PDF</span>
                   </button>
-                  <button className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors border-t border-slate-50 dark:border-slate-700">
-                    <span className="material-symbols-outlined text-slate-400 text-xl">content_copy</span>
+                  <button className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors border-t border-slate-50 dark:border-slate-700 text-slate-400">
+                    <span className="material-symbols-outlined text-xl">content_copy</span>
                     <span className="text-sm font-semibold">Duplicate</span>
                   </button>
                 </div>
@@ -179,7 +250,7 @@ const Invoice: React.FC<InvoiceProps> = ({ onBack, currencySymbol = '$' }) => {
 
         {/* Bottom Action Bar */}
         <div className="fixed bottom-0 w-full max-w-[480px] p-4 bg-white/80 dark:bg-[#1a242f]/80 backdrop-blur-md border-t dark:border-slate-800 z-50">
-          <button className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-primary/30">
+          <button className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-primary/30 active:scale-[0.98]">
             <span className="material-symbols-outlined">send</span>
             Send to Client
           </button>
