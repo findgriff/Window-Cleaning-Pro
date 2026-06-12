@@ -1,27 +1,37 @@
-# RinseRun / Window Cleaning Pro — dev deployment.
-# Uses the *.dev.opspocket.com wildcard DNS until a product domain is
-# registered. SPA served statically; /api + /healthz proxy to the
-# stdlib backend on 8099. Same-origin API → no CORS anywhere.
-rinserun.dev.opspocket.com {
+# RinseRun / Window Cleaning Pro — running at app.chesterwindowcleaner.co.uk
+# while Craig uses it for his own round. Everything is domain-agnostic:
+# when the product gets its own domain, change this host + the
+# RINSERUN_BASE_URL env and redeploy — nothing else references the domain.
+#
+# handle blocks are mutually exclusive — without them the SPA's
+# try_files fallback rewrites /api/* to /index.html before the proxy
+# matcher ever runs.
+app.chesterwindowcleaner.co.uk {
     tls {
         dns cloudflare {env.CLOUDFLARE_API_TOKEN}
     }
 
-    @api path /api/* /healthz
-    reverse_proxy @api 127.0.0.1:8099
-
-    root * /opt/rinserun/site
-    try_files {path} /index.html
-    file_server
     encode gzip zstd
-
-    @static path *.css *.js *.woff2 *.png *.webp *.svg
-    header @static Cache-Control "public, max-age=31536000, immutable"
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         -Server
+    }
+
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8099
+    }
+    handle /healthz {
+        reverse_proxy 127.0.0.1:8099
+    }
+
+    handle {
+        root * /opt/rinserun/site
+        try_files {path} /index.html
+        file_server
+        @static path *.css *.js *.woff2 *.png *.webp *.svg
+        header @static Cache-Control "public, max-age=31536000, immutable"
     }
 }
