@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Window Wash Pro</title>
+    <title>Window Cleaning Pro</title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
@@ -14,9 +14,12 @@
             theme: {
                 extend: {
                     colors: {
-                        "primary": "#137fec",
+                        "primary": "#1B8FD6",
+                        "primary-dark": "#136FA8",
+                        "accent": "#19C3E6",
+                        "navy": "#0C314A",
                         "background-light": "#f6f7f8",
-                        "background-dark": "#101922",
+                        "background-dark": "#0B1B29",
                     },
                     fontFamily: {
                         "sans": ["Inter", "sans-serif"],
@@ -45,18 +48,9 @@
             scrollbar-width: none;
         }
     </style>
-<script type="importmap">
-{
-  "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
-  }
-}
-</script>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 antialiased">
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
 </body>
 </html>

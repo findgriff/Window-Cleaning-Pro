@@ -66,7 +66,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({ jobId, onBack }) => {
               <div className="flex flex-col gap-1">
                 <p className="text-[#0d141b] dark:text-white text-lg font-bold leading-tight">123 Sunshine Lane</p>
                 <p className="text-[#4c739a] dark:text-slate-400 text-sm font-normal leading-normal">Silicon Valley, CA 94025</p>
-                <p className="text-[#137fec] text-sm font-medium mt-1">Customer: John Doe • (555) 012-3456</p>
+                <p className="text-[#1B8FD6] text-sm font-medium mt-1">Customer: John Doe • (555) 012-3456</p>
               </div>
               <div 
                 className="w-20 h-20 bg-center bg-no-repeat bg-cover rounded-lg shrink-0 ring-1 ring-slate-100 dark:ring-slate-800" 
