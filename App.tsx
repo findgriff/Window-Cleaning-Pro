@@ -286,8 +286,8 @@ const PropertyForm: React.FC<{ customerId: number; rounds: any[]; onSaved: () =>
       setAddresses(r.addresses || []);
       if (!r.addresses?.length) {
         setLookupMsg(r.lat != null
-          ? 'Map pinned. (Add a getAddress.io key in Settings for the house-by-house list — type the address below for now.)'
-          : 'Postcode not found.');
+          ? '✓ Pinned on the map — type the address below.'
+          : "Couldn't find that postcode — check it, or just type the address.");
       }
     } catch (err: any) { setLookupMsg(err.message); }
     setLooking(false);
@@ -319,7 +319,7 @@ const PropertyForm: React.FC<{ customerId: number; rounds: any[]; onSaved: () =>
         <Input placeholder="Postcode" value={f.postcode}
                onChange={(e) => setF({ ...f, postcode: e.target.value })} className="max-w-[10rem]" />
         <Btn type="button" kind="ghost" onClick={findAddresses} disabled={looking || !f.postcode}>
-          {looking ? 'Finding…' : 'Find address'}
+          {looking ? 'Finding…' : 'Find on map'}
         </Btn>
         {lookupMsg && <span className="text-xs text-slate-500 self-center">{lookupMsg}</span>}
       </div>
