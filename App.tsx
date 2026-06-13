@@ -160,13 +160,30 @@ const Dashboard: React.FC = () => {
 const Today: React.FC = () => {
   const [date, setDate] = useState(today());
   const [msg, setMsg] = useState('');
+  const [reschedId, setReschedId] = useState<number | null>(null);
+  const [showOneOff, setShowOneOff] = useState(false);
+  const [oneOff, setOneOff] = useState({ property_id: '', scheduled_date: today() });
   const jobs = useLoad(() => api('GET', `/api/jobs?date=${date}`), [date]);
   const texts = useLoad(() => api('GET', `/api/jobs/tonight-texts?date=${tomorrow()}`));
+  const properties = useLoad(() => api('GET', '/api/properties'));
 
   const act = async (fn: () => Promise<any>, success: (r: any) => string) => {
     setMsg('');
     try { const r = await fn(); setMsg(success(r)); jobs.reload(); }
     catch (e: any) { setMsg(e.message); }
+  };
+
+  const reschedule = (jid: number, newDate: string) =>
+    act(() => api('PATCH', `/api/jobs/${jid}`, { scheduled_date: newDate }),
+        () => `Moved to ${newDate}`).then(() => setReschedId(null));
+
+  const addOneOff = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oneOff.property_id) return;
+    act(() => api('POST', '/api/jobs', {
+      property_id: parseInt(oneOff.property_id, 10),
+      scheduled_date: oneOff.scheduled_date,
+    }), () => 'One-off job added').then(() => { setShowOneOff(false); setDate(oneOff.scheduled_date); });
   };
 
   return (
@@ -178,8 +195,25 @@ const Today: React.FC = () => {
                                 (r) => `${r.created} job${r.created === 1 ? '' : 's'} added to ${r.date}`)}>
           Generate due jobs
         </Btn>
+        <Btn kind="ghost" onClick={() => setShowOneOff(!showOneOff)}>+ One-off job</Btn>
         {msg && <span className="text-sm text-slate-500">{msg}</span>}
       </div>
+
+      {showOneOff && (
+        <Card title="Add a one-off job (off the regular cycle)">
+          <form onSubmit={addOneOff} className="flex flex-wrap gap-3 items-end">
+            <select value={oneOff.property_id} onChange={(e) => setOneOff({ ...oneOff, property_id: e.target.value })}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-w-[16rem]" required>
+              <option value="">Pick a property…</option>
+              {(properties.data?.properties || []).map((p: any) =>
+                <option key={p.id} value={p.id}>{p.customer_name} — {p.address}</option>)}
+            </select>
+            <input type="date" value={oneOff.scheduled_date} onChange={(e) => setOneOff({ ...oneOff, scheduled_date: e.target.value })}
+                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <Btn type="submit">Add job</Btn>
+          </form>
+        </Card>
+      )}
 
       <Card title={`Jobs — ${date}`}>
         {!jobs.data ? <p className="text-slate-400">Loading…</p> :
@@ -203,12 +237,18 @@ const Today: React.FC = () => {
                       'bg-sky-50 text-sky-700'}`}>{j.status}</span>
                   </td>
                   <td className="text-right space-x-2 whitespace-nowrap">
-                    {j.status === 'scheduled' && (<>
+                    {j.status === 'scheduled' && (reschedId === j.id ? (
+                      <input type="date" defaultValue={date} autoFocus
+                             onChange={(e) => e.target.value && reschedule(j.id, e.target.value)}
+                             onBlur={() => setReschedId(null)}
+                             className="border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+                    ) : (<>
                       <Btn onClick={() => act(() => api('POST', `/api/jobs/${j.id}/complete`, {}),
                                               (r) => `Done — invoice ${r.invoice_number} raised`)}>Done</Btn>
+                      <Btn kind="ghost" onClick={() => setReschedId(j.id)}>Move</Btn>
                       <Btn kind="ghost" onClick={() => act(() => api('POST', `/api/jobs/${j.id}/skip`, {}),
                                                            () => 'Skipped')}>Skip</Btn>
-                    </>)}
+                    </>))}
                   </td>
                 </tr>
               ))}
@@ -266,6 +306,42 @@ const MiniMap: React.FC<{ lat: number; lng: number; label?: string }> = ({ lat, 
   useEffect(() => () => { if (map.current) { map.current.remove(); map.current = null; } }, []);
 
   return <div ref={ref} className="h-48 w-full rounded-lg border border-slate-200 overflow-hidden z-0" />;
+};
+
+// Map of a whole round: numbered pins in route order, auto-fit to bounds.
+const RoundMap: React.FC<{ stops: { lat: number; lng: number; label: string }[] }> = ({ stops }) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const map = React.useRef<any>(null);
+  const layer = React.useRef<any>(null);
+
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || !ref.current || stops.length === 0) return;
+    if (!map.current) {
+      map.current = L.map(ref.current);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '© OpenStreetMap',
+      }).addTo(map.current);
+      layer.current = L.layerGroup().addTo(map.current);
+    }
+    layer.current.clearLayers();
+    const pts: any[] = [];
+    stops.forEach((s, i) => {
+      const icon = L.divIcon({
+        className: '', html: `<div style="background:#1B8FD6;color:#fff;width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.4);font:700 12px sans-serif"><span style="transform:rotate(45deg)">${i + 1}</span></div>`,
+        iconSize: [24, 24], iconAnchor: [12, 24],
+      });
+      L.marker([s.lat, s.lng], { icon }).bindPopup(`${i + 1}. ${s.label}`).addTo(layer.current);
+      pts.push([s.lat, s.lng]);
+    });
+    map.current.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+    setTimeout(() => map.current && map.current.invalidateSize(), 0);
+  }, [stops]);
+
+  useEffect(() => () => { if (map.current) { map.current.remove(); map.current = null; } }, []);
+
+  if (stops.length === 0) return null;
+  return <div ref={ref} className="h-72 w-full rounded-lg border border-slate-200 overflow-hidden z-0" />;
 };
 
 const PropertyForm: React.FC<{ customerId: number; rounds: any[]; onSaved: () => void }> =
@@ -610,10 +686,70 @@ const Customers: React.FC = () => {
 
 // ---------------------------------------------------------------- rounds --
 
+// One round, expanded: map of its stops in route order + a reorderable
+// list. Local order state lets you shuffle before saving.
+const RoundPanel: React.FC<{ round: any; properties: any[]; onReorder: () => void }> =
+  ({ round, properties, onReorder }) => {
+  const mine = useMemo(() =>
+    properties.filter((p) => p.round_id === round.id)
+      .sort((a, b) => a.position - b.position),
+    [properties, round.id]);
+  const [order, setOrder] = useState<any[]>(mine);
+  const [dirty, setDirty] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { setOrder(mine); setDirty(false); }, [mine]);
+
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    const next = [...order];
+    [next[i], next[j]] = [next[j], next[i]];
+    setOrder(next); setDirty(true);
+  };
+  const save = async () => {
+    try {
+      await api('POST', `/api/rounds/${round.id}/reorder`, { property_ids: order.map((p) => p.id) });
+      setDirty(false); setMsg('Route order saved'); onReorder();
+    } catch (e: any) { setMsg(e.message); }
+  };
+
+  const stops = order.filter((p) => p.latitude != null && p.longitude != null)
+    .map((p) => ({ lat: p.latitude, lng: p.longitude, label: p.address }));
+
+  return (
+    <div className="mt-3 ml-1 border-l-2 border-slate-100 pl-4 space-y-3">
+      {order.length === 0 ? (
+        <p className="text-slate-400 text-sm">No properties on this round yet — assign one from a customer's property.</p>
+      ) : (<>
+        <RoundMap stops={stops} />
+        {stops.length < order.length &&
+          <p className="text-xs text-slate-400">{order.length - stops.length} stop(s) have no map pin (no postcode looked up yet).</p>}
+        <ol className="space-y-1">
+          {order.map((p, i) => (
+            <li key={p.id} className="flex items-center gap-2 text-sm">
+              <span className="w-6 h-6 rounded-full bg-slate-100 grid place-items-center text-xs font-semibold">{i + 1}</span>
+              <span className="font-medium text-navy">{p.address}</span>
+              <span className="text-slate-400">{p.postcode}</span>
+              <span className="text-slate-500">{money(p.price_pence)}</span>
+              <span className="ml-auto flex gap-1">
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="px-2 rounded border border-slate-200 disabled:opacity-30">↑</button>
+                <button onClick={() => move(i, 1)} disabled={i === order.length - 1} className="px-2 rounded border border-slate-200 disabled:opacity-30">↓</button>
+              </span>
+            </li>
+          ))}
+        </ol>
+        {dirty && <Btn onClick={save}>Save route order</Btn>}
+        {msg && <span className="text-sm text-emerald-700 ml-2">{msg}</span>}
+      </>)}
+    </div>
+  );
+};
+
 const Rounds: React.FC = () => {
   const rounds = useLoad(() => api('GET', '/api/rounds'));
   const properties = useLoad(() => api('GET', '/api/properties'));
   const [name, setName] = useState('');
+  const [open, setOpen] = useState<number | null>(null);
   const [error, setError] = useState('');
 
   const add = async (e: React.FormEvent) => {
@@ -637,14 +773,22 @@ const Rounds: React.FC = () => {
       <Card title="Rounds">
         {!rounds.data ? <p className="text-slate-400">Loading…</p> :
          rounds.data.rounds.length === 0 ? <p className="text-slate-400 text-sm">No rounds yet.</p> : (
-          <ul className="text-sm space-y-2">
+          <div className="divide-y divide-slate-100">
             {rounds.data.rounds.map((r: any) => (
-              <li key={r.id} className="flex gap-3">
-                <span className="font-semibold text-navy">{r.name}</span>
-                <span className="text-slate-500">{countFor(r.id)} properties</span>
-              </li>
+              <div key={r.id} className="py-2">
+                <button onClick={() => setOpen(open === r.id ? null : r.id)}
+                        className="w-full flex items-center gap-3 text-left">
+                  <span className="text-slate-400">{open === r.id ? '▾' : '▸'}</span>
+                  <span className="font-semibold text-navy">{r.name}</span>
+                  <span className="text-sm text-slate-500">{countFor(r.id)} properties</span>
+                </button>
+                {open === r.id && properties.data && (
+                  <RoundPanel round={r} properties={properties.data.properties}
+                              onReorder={() => properties.reload()} />
+                )}
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </Card>
     </div>

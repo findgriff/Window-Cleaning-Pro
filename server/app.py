@@ -377,6 +377,51 @@ def h_jobs_generate(req: Request):
     return 200, {"created": created, "date": date_s}
 
 
+def h_job_create(req: Request):
+    """Add a one-off job for a property on a date, outside the cycle."""
+    user = _require(req)
+    pid = req.body.get("property_id")
+    date_s = req.body.get("scheduled_date")
+    if not pid or not date_s:
+        return 400, {"error": "property_id and scheduled_date required"}
+    prop = db_module.one(get_db(),
+        "SELECT * FROM properties WHERE id = ? AND tenant_id = ?",
+        (pid, user["tenant_id"]))
+    if not prop:
+        return 404, {"error": "property not found"}
+    price = int(req.body.get("price_pence") or prop["price_pence"])
+    jid = db_module.insert(get_db(), "jobs", {
+        "tenant_id": user["tenant_id"], "property_id": pid,
+        "scheduled_date": date_s, "price_pence": price,
+        "notes": req.body.get("notes"),
+    })
+    return 201, {"id": jid}
+
+
+def h_job_update(req: Request, jid: int):
+    """Reschedule a job (move it to another day) or reset its status."""
+    user = _require(req)
+    allowed = {k: v for k, v in req.body.items()
+               if k in {"scheduled_date", "status", "price_pence", "notes"}}
+    if not allowed:
+        return 400, {"error": "nothing to update"}
+    db_module.update(get_db(), "jobs", jid, user["tenant_id"], allowed)
+    return 200, {"ok": True}
+
+
+def h_round_reorder(req: Request, rid: int):
+    """Set route order for a round from an ordered list of property ids."""
+    user = _require(req)
+    ids = req.body.get("property_ids") or []
+    conn = get_db()
+    for pos, pid in enumerate(ids):
+        conn.execute(
+            "UPDATE properties SET position = ? WHERE id = ? AND tenant_id = ? AND round_id = ?",
+            (pos, pid, user["tenant_id"], rid))
+    conn.commit()
+    return 200, {"ok": True}
+
+
 def h_job_complete(req: Request, jid: int):
     user = _require(req)
     conn = get_db()
@@ -553,9 +598,12 @@ ROUTES = [
     ("PATCH", re.compile(r"^/api/properties/(\d+)$"), h_property_update),
     ("GET",  re.compile(r"^/api/address/lookup$"), h_address_lookup),
     ("GET",  re.compile(r"^/api/jobs$"), h_jobs),
+    ("POST", re.compile(r"^/api/jobs$"), h_job_create),
     ("POST", re.compile(r"^/api/jobs/generate$"), h_jobs_generate),
+    ("PATCH", re.compile(r"^/api/jobs/(\d+)$"), h_job_update),
     ("POST", re.compile(r"^/api/jobs/(\d+)/complete$"), h_job_complete),
     ("POST", re.compile(r"^/api/jobs/(\d+)/skip$"), h_job_skip),
+    ("POST", re.compile(r"^/api/rounds/(\d+)/reorder$"), h_round_reorder),
     ("GET",  re.compile(r"^/api/jobs/tonight-texts$"), h_tonight_texts),
     ("GET",  re.compile(r"^/api/invoices$"), h_invoices),
     ("POST", re.compile(r"^/api/invoices/(\d+)/mark-paid$"), h_invoice_mark_paid),
