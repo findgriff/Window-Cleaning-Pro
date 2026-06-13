@@ -356,71 +356,251 @@ const PropertyForm: React.FC<{ customerId: number; rounds: any[]; onSaved: () =>
 
 // ------------------------------------------------------------- customers --
 
+// Expanded panel for one customer: properties (edit/delete + add),
+// job history, invoices, balance, edit profile, archive.
+const CustomerDetail: React.FC<{ customerId: number; rounds: any[]; onChanged: () => void }> =
+  ({ customerId, rounds, onChanged }) => {
+  const detail = useLoad(() => api('GET', `/api/customers/${customerId}`), [customerId]);
+  const [editing, setEditing] = useState(false);
+  const [addingProp, setAddingProp] = useState(false);
+  const [editProp, setEditProp] = useState<number | null>(null);
+  const [msg, setMsg] = useState('');
+
+  const reloadAll = () => { detail.reload(); onChanged(); };
+  const act = async (fn: () => Promise<any>, ok = '') => {
+    setMsg('');
+    try { await fn(); setMsg(ok); reloadAll(); } catch (e: any) { setMsg(e.message); }
+  };
+
+  if (!detail.data) return <p className="text-slate-400 text-sm pl-1">Loading…</p>;
+  const { customer: c, properties, jobs, invoices, balance_pence } = detail.data;
+
+  return (
+    <div className="mt-3 ml-1 border-l-2 border-slate-100 pl-4 space-y-4">
+      {editing ? (
+        <EditCustomerForm customer={c}
+          onSaved={() => { setEditing(false); reloadAll(); }}
+          onCancel={() => setEditing(false)} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {c.phone && <a href={`tel:${c.phone}`} className="text-primary">{c.phone}</a>}
+          {c.email && <a href={`mailto:${c.email}`} className="text-primary">{c.email}</a>}
+          {c.notes && <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full">{c.notes}</span>}
+          <Btn kind="ghost" onClick={() => setEditing(true)}>Edit</Btn>
+          <Btn kind="ghost" onClick={() => { if (confirm(`Archive ${c.name}? They'll be hidden from the list.`)) act(() => api('PATCH', `/api/customers/${c.id}`, { archived: 1 })); }}>Archive</Btn>
+        </div>
+      )}
+
+      {balance_pence > 0 && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <span className="text-sm font-semibold text-amber-800">Owes {money(balance_pence)}</span>
+          <Btn className="ml-auto" onClick={() => act(() => api('POST', `/api/customers/${c.id}/pay-balance`, { method: 'transfer' }), 'Balance cleared')}>
+            Mark all paid
+          </Btn>
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Properties</h4>
+          <Btn kind="ghost" onClick={() => setAddingProp(!addingProp)}>+ Property</Btn>
+        </div>
+        {properties.map((p: any) => editProp === p.id ? (
+          <EditPropertyForm key={p.id} property={p} rounds={rounds}
+            onSaved={() => { setEditProp(null); reloadAll(); }} onCancel={() => setEditProp(null)} />
+        ) : (
+          <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm py-1">
+            <span>🏠 {p.address}{p.postcode ? `, ${p.postcode}` : ''}</span>
+            <span className="text-slate-500">{money(p.price_pence)} {p.frequency_weeks ? `every ${p.frequency_weeks}wk` : 'ad hoc'}</span>
+            {p.round_name && <span className="text-xs px-2 py-0.5 bg-slate-100 rounded-full">{p.round_name}</span>}
+            <Btn kind="ghost" onClick={() => setEditProp(p.id)}>Edit</Btn>
+            <Btn kind="ghost" onClick={() => { if (confirm('Remove this property?')) act(() => api('PATCH', `/api/properties/${p.id}`, { active: 0 })); }}>Delete</Btn>
+          </div>
+        ))}
+        {properties.length === 0 && <p className="text-slate-400 text-sm">No properties yet.</p>}
+        {addingProp && <PropertyForm customerId={c.id} rounds={rounds}
+          onSaved={() => { setAddingProp(false); reloadAll(); }} />}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Job history</h4>
+          {jobs.length === 0 ? <p className="text-slate-400 text-sm">None yet.</p> : (
+            <ul className="text-sm space-y-1">
+              {jobs.slice(0, 8).map((j: any) => (
+                <li key={j.id} className="flex gap-2">
+                  <span className="text-slate-400 w-20">{j.scheduled_date}</span>
+                  <span className={j.status === 'done' ? 'text-emerald-700' : 'text-slate-500'}>{j.status}</span>
+                  <span className="text-slate-500">{money(j.price_pence)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Invoices</h4>
+          {invoices.length === 0 ? <p className="text-slate-400 text-sm">None yet.</p> : (
+            <ul className="text-sm space-y-1">
+              {invoices.slice(0, 8).map((i: any) => (
+                <li key={i.id} className="flex gap-2 items-center">
+                  <span className="font-mono text-xs w-28">{i.number}</span>
+                  <span>{money(i.amount_pence)}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${i.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{i.status}</span>
+                  {i.status === 'unpaid' && <button className="text-primary text-xs"
+                    onClick={() => act(() => api('POST', `/api/invoices/${i.id}/mark-paid`, { method: 'transfer' }), 'Marked paid')}>mark paid</button>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      {msg && <p className="text-sm text-emerald-700">{msg}</p>}
+    </div>
+  );
+};
+
+const EditCustomerForm: React.FC<{ customer: any; onSaved: () => void; onCancel: () => void }> =
+  ({ customer, onSaved, onCancel }) => {
+  const [f, setF] = useState({ name: customer.name, email: customer.email || '', phone: customer.phone || '', notes: customer.notes || '' });
+  const [error, setError] = useState('');
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault(); setError('');
+    try { await api('PATCH', `/api/customers/${customer.id}`, f); onSaved(); }
+    catch (err: any) { setError(err.message); }
+  };
+  return (
+    <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2 bg-slate-50 rounded-lg p-3">
+      <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
+      <Input placeholder="Email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+      <Input placeholder="Phone" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+      <Input placeholder="Notes" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
+      <div className="flex gap-2">
+        <Btn type="submit">Save</Btn>
+        <Btn type="button" kind="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+      <Err msg={error} />
+    </form>
+  );
+};
+
+const EditPropertyForm: React.FC<{ property: any; rounds: any[]; onSaved: () => void; onCancel: () => void }> =
+  ({ property, rounds, onSaved, onCancel }) => {
+  const [f, setF] = useState({
+    address: property.address, postcode: property.postcode || '',
+    price: (property.price_pence / 100).toString(),
+    frequency_weeks: String(property.frequency_weeks),
+    round_id: property.round_id ? String(property.round_id) : '',
+  });
+  const [error, setError] = useState('');
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault(); setError('');
+    try {
+      await api('PATCH', `/api/properties/${property.id}`, {
+        address: f.address, postcode: f.postcode,
+        price_pence: Math.round(parseFloat(f.price || '0') * 100),
+        frequency_weeks: parseInt(f.frequency_weeks, 10),
+        round_id: f.round_id ? parseInt(f.round_id, 10) : null,
+      });
+      onSaved();
+    } catch (err: any) { setError(err.message); }
+  };
+  return (
+    <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2 bg-slate-50 rounded-lg p-3 my-1">
+      <Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} required className="xl:col-span-2" />
+      <Input placeholder="Postcode" value={f.postcode} onChange={(e) => setF({ ...f, postcode: e.target.value })} />
+      <Input type="number" step="0.01" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} required />
+      <select value={f.frequency_weeks} onChange={(e) => setF({ ...f, frequency_weeks: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-2 text-sm">
+        {[4, 5, 6, 7, 8].map((w) => <option key={w} value={w}>Every {w} weeks</option>)}
+        <option value="0">Ad hoc only</option>
+      </select>
+      <div className="flex gap-2">
+        <select value={f.round_id} onChange={(e) => setF({ ...f, round_id: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-2 text-sm flex-1">
+          <option value="">No round</option>
+          {rounds.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        <Btn type="submit">Save</Btn>
+        <Btn type="button" kind="ghost" onClick={onCancel}>✕</Btn>
+      </div>
+      <Err msg={error} />
+    </form>
+  );
+};
+
 const Customers: React.FC = () => {
-  const customers = useLoad(() => api('GET', '/api/customers'));
+  const [q, setQ] = useState('');
+  const [owedOnly, setOwedOnly] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [open, setOpen] = useState<number | null>(null);
+  const customers = useLoad(() => api('GET', `/api/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`), [q]);
   const rounds = useLoad(() => api('GET', '/api/rounds'));
-  const properties = useLoad(() => api('GET', '/api/properties'));
   const [error, setError] = useState('');
   const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '' });
-  const [propFor, setPropFor] = useState<number | null>(null);
 
   const addCustomer = async (e: React.FormEvent) => {
     e.preventDefault(); setError('');
     try {
       await api('POST', '/api/customers', form);
       setForm({ name: '', email: '', phone: '', notes: '' });
+      setShowAdd(false);
       customers.reload();
     } catch (err: any) { setError(err.message); }
   };
 
-  const propsByCustomer = useMemo(() => {
-    const map: Record<number, any[]> = {};
-    (properties.data?.properties || []).forEach((p: any) => {
-      (map[p.customer_id] ||= []).push(p);
-    });
-    return map;
-  }, [properties.data]);
+  let list = customers.data?.customers || [];
+  if (owedOnly) list = list.filter((c: any) => c.balance_pence > 0);
+  const totalOwed = (customers.data?.customers || []).reduce((s: number, c: any) => s + c.balance_pence, 0);
 
   return (
-    <div className="space-y-6">
-      <Card title="Add a customer">
-        <form onSubmit={addCustomer} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
-          <Input placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <Input placeholder="Notes (gate code, dog…)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          <Btn type="submit">Add customer</Btn>
-        </form>
-        <Err msg={error} />
-      </Card>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Input placeholder="Search name, phone or email…" value={q}
+               onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
+        <button onClick={() => setOwedOnly(!owedOnly)}
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold ${owedOnly ? 'bg-amber-500 text-white' : 'bg-white border border-slate-300 text-slate-600'}`}>
+          Owes money{totalOwed > 0 ? ` · ${money(totalOwed)}` : ''}
+        </button>
+        <Btn className="ml-auto" onClick={() => setShowAdd(!showAdd)}>+ Add customer</Btn>
+      </div>
 
-      <Card title={`Customers (${customers.data?.customers.length ?? '…'})`}>
+      {showAdd && (
+        <Card>
+          <form onSubmit={addCustomer} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+            <Input placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus />
+            <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <Input placeholder="Notes (gate code, dog…)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            <Btn type="submit">Add</Btn>
+          </form>
+          <Err msg={error} />
+        </Card>
+      )}
+
+      <Card title={`Customers (${list.length})`}>
         {!customers.data ? <p className="text-slate-400">Loading…</p> : (
           <div className="divide-y divide-slate-100">
-            {customers.data.customers.map((c: any) => (
-              <div key={c.id} className="py-3">
-                <div className="flex flex-wrap items-center gap-3">
+            {list.map((c: any) => (
+              <div key={c.id} className="py-2">
+                <button onClick={() => setOpen(open === c.id ? null : c.id)}
+                        className="w-full flex flex-wrap items-center gap-3 text-left">
+                  <span className="text-slate-400">{open === c.id ? '▾' : '▸'}</span>
                   <span className="font-semibold text-navy">{c.name}</span>
                   {c.phone && <span className="text-sm text-slate-500">{c.phone}</span>}
-                  {c.email && <span className="text-sm text-slate-500">{c.email}</span>}
-                  {c.notes && <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full">{c.notes}</span>}
-                  <Btn kind="ghost" className="ml-auto" onClick={() => setPropFor(propFor === c.id ? null : c.id)}>
-                    + Property
-                  </Btn>
-                </div>
-                {(propsByCustomer[c.id] || []).map((p: any) => (
-                  <p key={p.id} className="text-sm text-slate-600 mt-1.5 ml-1">
-                    🏠 {p.address}{p.postcode ? `, ${p.postcode}` : ''} — {money(p.price_pence)} every {p.frequency_weeks} weeks
-                  </p>
-                ))}
-                {propFor === c.id && (
-                  <PropertyForm customerId={c.id} rounds={rounds.data?.rounds || []}
-                                onSaved={() => { setPropFor(null); properties.reload(); }} />
+                  {c.balance_pence > 0 && (
+                    <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full font-semibold">
+                      owes {money(c.balance_pence)}
+                    </span>
+                  )}
+                </button>
+                {open === c.id && (
+                  <CustomerDetail customerId={c.id} rounds={rounds.data?.rounds || []}
+                                  onChanged={() => customers.reload()} />
                 )}
               </div>
             ))}
-            {customers.data.customers.length === 0 &&
-              <p className="text-slate-400 text-sm py-2">No customers yet — add your first above.</p>}
+            {list.length === 0 &&
+              <p className="text-slate-400 text-sm py-2">
+                {q || owedOnly ? 'No matches.' : 'No customers yet — add your first.'}
+              </p>}
           </div>
         )}
       </Card>

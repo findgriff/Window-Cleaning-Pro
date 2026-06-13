@@ -182,9 +182,19 @@ def h_me(req: Request):
 def h_customers(req: Request):
     user = _require(req)
     if req.method == "GET":
-        return 200, {"customers": db_module.rows(get_db(),
-            "SELECT * FROM customers WHERE tenant_id = ? AND archived = 0 "
-            "ORDER BY name", (user["tenant_id"],))}
+        # Each customer carries balance_pence (sum of their unpaid invoices)
+        # so the list can show debt and sort/filter by "who owes me".
+        q = (req.query.get("q") or "").strip()
+        sql = ("SELECT c.*, "
+               "COALESCE((SELECT SUM(amount_pence) FROM invoices i "
+               "  WHERE i.customer_id = c.id AND i.status = 'unpaid'), 0) AS balance_pence "
+               "FROM customers c WHERE c.tenant_id = ? AND c.archived = 0")
+        args: list = [user["tenant_id"]]
+        if q:
+            sql += " AND (c.name LIKE ? OR c.phone LIKE ? OR c.email LIKE ?)"
+            args += [f"%{q}%", f"%{q}%", f"%{q}%"]
+        sql += " ORDER BY c.name"
+        return 200, {"customers": db_module.rows(get_db(), sql, tuple(args))}
     name = (req.body.get("name") or "").strip()
     if not name:
         return 400, {"error": "name required"}
@@ -197,6 +207,32 @@ def h_customers(req: Request):
     return 201, {"id": cid}
 
 
+def h_customer_detail(req: Request, cid: int):
+    """Full picture for one customer: profile, properties, job history,
+    invoices, and outstanding balance."""
+    user = _require(req)
+    conn, t = get_db(), user["tenant_id"]
+    cust = db_module.one(conn,
+        "SELECT * FROM customers WHERE id = ? AND tenant_id = ?", (cid, t))
+    if not cust:
+        return 404, {"error": "customer not found"}
+    properties = db_module.rows(conn,
+        "SELECT p.*, r.name AS round_name FROM properties p "
+        "LEFT JOIN rounds r ON r.id = p.round_id "
+        "WHERE p.customer_id = ? AND p.tenant_id = ? AND p.active = 1 "
+        "ORDER BY p.id", (cid, t))
+    jobs = db_module.rows(conn,
+        "SELECT j.*, p.address FROM jobs j JOIN properties p ON p.id = j.property_id "
+        "WHERE p.customer_id = ? AND j.tenant_id = ? "
+        "ORDER BY j.scheduled_date DESC LIMIT 50", (cid, t))
+    invoices = db_module.rows(conn,
+        "SELECT * FROM invoices WHERE customer_id = ? AND tenant_id = ? "
+        "ORDER BY issued_at DESC LIMIT 50", (cid, t))
+    balance = sum(i["amount_pence"] for i in invoices if i["status"] == "unpaid")
+    return 200, {"customer": cust, "properties": properties,
+                 "jobs": jobs, "invoices": invoices, "balance_pence": balance}
+
+
 def h_customer_update(req: Request, cid: int):
     user = _require(req)
     allowed = {k: v for k, v in req.body.items()
@@ -206,6 +242,20 @@ def h_customer_update(req: Request, cid: int):
     if not allowed:
         return 400, {"error": "nothing to update"}
     db_module.update(get_db(), "customers", cid, user["tenant_id"], allowed)
+    return 200, {"ok": True}
+
+
+def h_customer_pay_balance(req: Request, cid: int):
+    """Mark every unpaid invoice for a customer paid — clears their balance
+    in one tap (e.g. they finally paid for 3 cleans at once)."""
+    user = _require(req)
+    method = req.body.get("method") or "transfer"
+    conn = get_db()
+    conn.execute(
+        "UPDATE invoices SET status='paid', method=?, paid_at=strftime('%s','now') "
+        "WHERE customer_id = ? AND tenant_id = ? AND status = 'unpaid'",
+        (method, cid, user["tenant_id"]))
+    conn.commit()
     return 200, {"ok": True}
 
 
@@ -493,7 +543,9 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/me$"), h_me),
     ("GET",  re.compile(r"^/api/customers$"), h_customers),
     ("POST", re.compile(r"^/api/customers$"), h_customers),
+    ("GET",  re.compile(r"^/api/customers/(\d+)$"), h_customer_detail),
     ("PATCH", re.compile(r"^/api/customers/(\d+)$"), h_customer_update),
+    ("POST", re.compile(r"^/api/customers/(\d+)/pay-balance$"), h_customer_pay_balance),
     ("GET",  re.compile(r"^/api/rounds$"), h_rounds),
     ("POST", re.compile(r"^/api/rounds$"), h_rounds),
     ("GET",  re.compile(r"^/api/properties$"), h_properties),
