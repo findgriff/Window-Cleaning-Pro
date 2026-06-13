@@ -235,6 +235,125 @@ const Today: React.FC = () => {
   );
 };
 
+// ------------------------------------------------------------- map + form -
+
+// Small Leaflet map showing a single pin. Leaflet is loaded from CDN in
+// index.html, so we reach it via window.L.
+const MiniMap: React.FC<{ lat: number; lng: number; label?: string }> = ({ lat, lng, label }) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const map = React.useRef<any>(null);
+  const marker = React.useRef<any>(null);
+
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || !ref.current) return;
+    if (!map.current) {
+      map.current = L.map(ref.current, { attributionControl: true, zoomControl: true })
+        .setView([lat, lng], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '© OpenStreetMap',
+      }).addTo(map.current);
+      marker.current = L.marker([lat, lng]).addTo(map.current);
+    } else {
+      map.current.setView([lat, lng], 16);
+      marker.current.setLatLng([lat, lng]);
+    }
+    if (label) marker.current.bindPopup(label);
+    // Leaflet needs a nudge when rendered inside a freshly-shown container.
+    setTimeout(() => map.current && map.current.invalidateSize(), 0);
+  }, [lat, lng, label]);
+
+  useEffect(() => () => { if (map.current) { map.current.remove(); map.current = null; } }, []);
+
+  return <div ref={ref} className="h-48 w-full rounded-lg border border-slate-200 overflow-hidden z-0" />;
+};
+
+const PropertyForm: React.FC<{ customerId: number; rounds: any[]; onSaved: () => void }> =
+  ({ customerId, rounds, onSaved }) => {
+  const [f, setF] = useState({ address: '', postcode: '', price: '', frequency_weeks: '6', round_id: '' });
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [addresses, setAddresses] = useState<any[]>([]);
+  const [lookupMsg, setLookupMsg] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [error, setError] = useState('');
+
+  const findAddresses = async () => {
+    setLooking(true); setLookupMsg(''); setAddresses([]);
+    try {
+      const r = await api('GET', `/api/address/lookup?postcode=${encodeURIComponent(f.postcode)}`);
+      if (!r.valid) { setLookupMsg("That postcode doesn't look right."); setLooking(false); return; }
+      if (r.lat != null) setCoords({ lat: r.lat, lng: r.lng });
+      setAddresses(r.addresses || []);
+      if (!r.addresses?.length) {
+        setLookupMsg(r.lat != null
+          ? 'Map pinned. (Add a getAddress.io key in Settings for the house-by-house list — type the address below for now.)'
+          : 'Postcode not found.');
+      }
+    } catch (err: any) { setLookupMsg(err.message); }
+    setLooking(false);
+  };
+
+  const pick = (idx: string) => {
+    const a = addresses[Number(idx)];
+    if (a) setF((s) => ({ ...s, address: a.formatted }));
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setError('');
+    try {
+      await api('POST', '/api/properties', {
+        customer_id: customerId,
+        address: f.address, postcode: f.postcode,
+        price_pence: Math.round(parseFloat(f.price || '0') * 100),
+        frequency_weeks: parseInt(f.frequency_weeks, 10),
+        round_id: f.round_id ? parseInt(f.round_id, 10) : null,
+        latitude: coords?.lat ?? null, longitude: coords?.lng ?? null,
+      });
+      onSaved();
+    } catch (err: any) { setError(err.message); }
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-3 bg-slate-50 rounded-lg p-3 space-y-2">
+      <div className="flex gap-2">
+        <Input placeholder="Postcode" value={f.postcode}
+               onChange={(e) => setF({ ...f, postcode: e.target.value })} className="max-w-[10rem]" />
+        <Btn type="button" kind="ghost" onClick={findAddresses} disabled={looking || !f.postcode}>
+          {looking ? 'Finding…' : 'Find address'}
+        </Btn>
+        {lookupMsg && <span className="text-xs text-slate-500 self-center">{lookupMsg}</span>}
+      </div>
+
+      {addresses.length > 0 && (
+        <select defaultValue="" onChange={(e) => pick(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-2 py-2 text-sm">
+          <option value="" disabled>Pick the address… ({addresses.length} found)</option>
+          {addresses.map((a, i) => <option key={i} value={i}>{a.formatted}</option>)}
+        </select>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+        <Input placeholder="Address *" value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} required className="xl:col-span-2" />
+        <Input placeholder="Price £ *" type="number" step="0.01" min="0" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} required />
+        <select value={f.frequency_weeks} onChange={(e) => setF({ ...f, frequency_weeks: e.target.value })}
+                className="border border-slate-300 rounded-lg px-2 py-2 text-sm">
+          {[4, 5, 6, 7, 8].map((w) => <option key={w} value={w}>Every {w} weeks</option>)}
+          <option value="0">Ad hoc only</option>
+        </select>
+        <select value={f.round_id} onChange={(e) => setF({ ...f, round_id: e.target.value })}
+                className="border border-slate-300 rounded-lg px-2 py-2 text-sm">
+          <option value="">No round</option>
+          {rounds.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        <Btn type="submit">Save</Btn>
+      </div>
+
+      {coords && <MiniMap lat={coords.lat} lng={coords.lng} label={f.address || f.postcode} />}
+      <Err msg={error} />
+    </form>
+  );
+};
+
 // ------------------------------------------------------------- customers --
 
 const Customers: React.FC = () => {
@@ -244,7 +363,6 @@ const Customers: React.FC = () => {
   const [error, setError] = useState('');
   const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '' });
   const [propFor, setPropFor] = useState<number | null>(null);
-  const [propForm, setPropForm] = useState({ address: '', postcode: '', price: '', frequency_weeks: '6', round_id: '' });
 
   const addCustomer = async (e: React.FormEvent) => {
     e.preventDefault(); setError('');
@@ -252,22 +370,6 @@ const Customers: React.FC = () => {
       await api('POST', '/api/customers', form);
       setForm({ name: '', email: '', phone: '', notes: '' });
       customers.reload();
-    } catch (err: any) { setError(err.message); }
-  };
-
-  const addProperty = async (e: React.FormEvent) => {
-    e.preventDefault(); setError('');
-    try {
-      await api('POST', '/api/properties', {
-        customer_id: propFor,
-        address: propForm.address, postcode: propForm.postcode,
-        price_pence: Math.round(parseFloat(propForm.price || '0') * 100),
-        frequency_weeks: parseInt(propForm.frequency_weeks, 10),
-        round_id: propForm.round_id ? parseInt(propForm.round_id, 10) : null,
-      });
-      setPropFor(null);
-      setPropForm({ address: '', postcode: '', price: '', frequency_weeks: '6', round_id: '' });
-      properties.reload();
     } catch (err: any) { setError(err.message); }
   };
 
@@ -312,24 +414,8 @@ const Customers: React.FC = () => {
                   </p>
                 ))}
                 {propFor === c.id && (
-                  <form onSubmit={addProperty} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2 mt-3 bg-slate-50 rounded-lg p-3">
-                    <Input placeholder="Address *" value={propForm.address} onChange={(e) => setPropForm({ ...propForm, address: e.target.value })} required className="xl:col-span-2" />
-                    <Input placeholder="Postcode" value={propForm.postcode} onChange={(e) => setPropForm({ ...propForm, postcode: e.target.value })} />
-                    <Input placeholder="Price £ *" type="number" step="0.01" min="0" value={propForm.price} onChange={(e) => setPropForm({ ...propForm, price: e.target.value })} required />
-                    <select value={propForm.frequency_weeks} onChange={(e) => setPropForm({ ...propForm, frequency_weeks: e.target.value })}
-                            className="border border-slate-300 rounded-lg px-2 py-2 text-sm">
-                      {[4, 5, 6, 7, 8].map((w) => <option key={w} value={w}>Every {w} weeks</option>)}
-                      <option value="0">Ad hoc only</option>
-                    </select>
-                    <div className="flex gap-2">
-                      <select value={propForm.round_id} onChange={(e) => setPropForm({ ...propForm, round_id: e.target.value })}
-                              className="border border-slate-300 rounded-lg px-2 py-2 text-sm flex-1">
-                        <option value="">No round</option>
-                        {(rounds.data?.rounds || []).map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
-                      <Btn type="submit">Save</Btn>
-                    </div>
-                  </form>
+                  <PropertyForm customerId={c.id} rounds={rounds.data?.rounds || []}
+                                onSaved={() => { setPropFor(null); properties.reload(); }} />
                 )}
               </div>
             ))}

@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS properties (
   price_pence     INTEGER NOT NULL DEFAULT 0,   -- regular clean price
   frequency_weeks INTEGER NOT NULL DEFAULT 6,   -- 4..8 typical; 0 = ad-hoc only
   position        INTEGER NOT NULL DEFAULT 0,   -- order within round (route order)
+  latitude        REAL,                         -- map pin (from postcode lookup)
+  longitude       REAL,
   access_notes    TEXT,
   active          INTEGER NOT NULL DEFAULT 1,
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))

@@ -17,18 +17,41 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from server import auth, db as db_module, sumup
+from server import address, auth, db as db_module, sumup
 
 DB_PATH = os.environ.get("RINSERUN_DB", "/var/lib/rinserun/app.db")
 LISTEN_HOST = os.environ.get("RINSERUN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("RINSERUN_PORT", "8099"))
 RESEND_KEY_PATH = os.environ.get("RINSERUN_RESEND_KEY_PATH", "/etc/rinserun/resend-api-key")
+GETADDRESS_KEY_PATH = os.environ.get("RINSERUN_GETADDRESS_KEY_PATH", "/etc/rinserun/getaddress-api-key")
 FROM_ADDR = os.environ.get("RINSERUN_FROM", "RinseRun <hello@mail.opspocket.com>")
 BASE_URL = os.environ.get("RINSERUN_BASE_URL", "https://rinserun.dev.opspocket.com")
 
 log = logging.getLogger("rinserun")
 
 _conn: sqlite3.Connection | None = None
+
+
+class _RateLimiter:
+    """Tiny per-key token bucket. Guards the paid address proxy."""
+    def __init__(self, capacity: int, per_seconds: float):
+        self.capacity = capacity
+        self.rate = capacity / per_seconds
+        self._buckets: dict[str, tuple[float, float]] = {}
+
+    def allow(self, key: str) -> bool:
+        import time
+        now = time.monotonic()
+        tokens, last = self._buckets.get(key, (self.capacity, now))
+        tokens = min(self.capacity, tokens + (now - last) * self.rate)
+        if tokens < 1:
+            self._buckets[key] = (tokens, now)
+            return False
+        self._buckets[key] = (tokens - 1, now)
+        return True
+
+
+_RATE_ADDRESS = _RateLimiter(capacity=40, per_seconds=60)  # 40 lookups/min/IP
 
 
 def get_db() -> sqlite3.Connection:
@@ -228,16 +251,30 @@ def h_properties(req: Request):
         "price_pence": int(req.body["price_pence"]),
         "frequency_weeks": int(req.body.get("frequency_weeks") or 6),
         "position": int(req.body.get("position") or 0),
+        "latitude": req.body.get("latitude"),
+        "longitude": req.body.get("longitude"),
         "access_notes": req.body.get("access_notes"),
     })
     return 201, {"id": pid}
+
+
+def h_address_lookup(req: Request):
+    """Postcode -> address list (getAddress.io) + map coords (postcodes.io).
+    Auth-gated and rate-limited because getAddress.io lookups cost money."""
+    _require(req)
+    if not _RATE_ADDRESS.allow(req.ip):
+        return 429, {"error": "too many lookups — slow down a moment"}
+    postcode = req.query.get("postcode", "")
+    key = _read_secret(GETADDRESS_KEY_PATH)
+    return 200, address.lookup(postcode, getaddress_key=key)
 
 
 def h_property_update(req: Request, pid: int):
     user = _require(req)
     allowed = {k: v for k, v in req.body.items()
                if k in {"round_id", "address", "postcode", "price_pence",
-                        "frequency_weeks", "position", "access_notes", "active"}}
+                        "frequency_weeks", "position", "access_notes", "active",
+                        "latitude", "longitude"}}
     if not allowed:
         return 400, {"error": "nothing to update"}
     db_module.update(get_db(), "properties", pid, user["tenant_id"], allowed)
@@ -462,6 +499,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/properties$"), h_properties),
     ("POST", re.compile(r"^/api/properties$"), h_properties),
     ("PATCH", re.compile(r"^/api/properties/(\d+)$"), h_property_update),
+    ("GET",  re.compile(r"^/api/address/lookup$"), h_address_lookup),
     ("GET",  re.compile(r"^/api/jobs$"), h_jobs),
     ("POST", re.compile(r"^/api/jobs/generate$"), h_jobs_generate),
     ("POST", re.compile(r"^/api/jobs/(\d+)/complete$"), h_job_complete),

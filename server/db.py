@@ -12,8 +12,23 @@ def connect(path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA_PATH.read_text())
+    _migrate(conn)
     conn.commit()
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive migrations for databases created before a column existed.
+    CREATE TABLE IF NOT EXISTS won't add columns to an existing table."""
+    additions = {
+        "properties": ["latitude REAL", "longitude REAL"],
+    }
+    for table, cols in additions.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for coldef in cols:
+            name = coldef.split()[0]
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {coldef}")
 
 
 def rows(conn, sql: str, args=()) -> list[dict]:
