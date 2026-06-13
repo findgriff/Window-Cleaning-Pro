@@ -463,6 +463,7 @@ const CustomerDetail: React.FC<{ customerId: number; rounds: any[]; onChanged: (
           {c.email && <a href={`mailto:${c.email}`} className="text-primary">{c.email}</a>}
           {c.notes && <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full">{c.notes}</span>}
           <Btn kind="ghost" onClick={() => setEditing(true)}>Edit</Btn>
+          {c.email && <Btn kind="ghost" onClick={() => act(() => api('POST', `/api/customers/${c.id}/review-request`), 'Review request emailed')}>Request review</Btn>}
           <Btn kind="ghost" onClick={() => { if (confirm(`Archive ${c.name}? They'll be hidden from the list.`)) act(() => api('PATCH', `/api/customers/${c.id}`, { archived: 1 })); }}>Archive</Btn>
         </div>
       )}
@@ -839,6 +840,8 @@ const Invoices: React.FC = () => {
                   </td>
                   <td className="text-right space-x-2 whitespace-nowrap">
                     {i.status === 'unpaid' && (<>
+                      <Btn kind="ghost" onClick={() => act(() => api('POST', `/api/invoices/${i.id}/send`),
+                        (r) => r.had_pay_link ? 'Emailed to customer with pay link' : 'Emailed to customer')}>Email</Btn>
                       <Btn kind="ghost" onClick={() => act(() => api('POST', `/api/invoices/${i.id}/mark-paid`, { method: 'transfer' }), () => 'Marked paid (transfer)')}>Paid · transfer</Btn>
                       <Btn kind="ghost" onClick={() => act(() => api('POST', `/api/invoices/${i.id}/mark-paid`, { method: 'sumup_reader' }), () => 'Marked paid (reader)')}>Paid · reader</Btn>
                       <Btn onClick={() => act(async () => {
@@ -886,10 +889,40 @@ const Settings: React.FC<{ me: any; refreshMe: () => void }> = ({ me, refreshMe 
     setBusy(false);
   };
 
+  const [biz, setBiz] = useState({
+    name: me.tenant.name,
+    review_url: me.tenant.review_url || '',
+    pay_instructions: me.tenant.pay_instructions || '',
+  });
+  const [bizMsg, setBizMsg] = useState('');
+  const saveBiz = async (e: React.FormEvent) => {
+    e.preventDefault(); setBizMsg('');
+    try { await api('POST', '/api/settings', biz); setBizMsg('Saved'); refreshMe(); }
+    catch (err: any) { setBizMsg(err.message); }
+  };
+
   return (
     <div className="space-y-6 max-w-xl">
       <Card title="Business">
-        <p className="text-sm text-slate-600">{me.tenant.name} · {me.user.email} · {me.tenant.currency}</p>
+        <form onSubmit={saveBiz} className="space-y-3">
+          <label className="block text-sm text-slate-500">Business name
+            <Input value={biz.name} onChange={(e) => setBiz({ ...biz, name: e.target.value })} className="mt-1" />
+          </label>
+          <label className="block text-sm text-slate-500">Google review link
+            <span className="block text-xs text-slate-400">Sent when you tap "Request review" on a customer. Find it in your Google Business Profile.</span>
+            <Input placeholder="https://g.page/r/…" value={biz.review_url} onChange={(e) => setBiz({ ...biz, review_url: e.target.value })} className="mt-1" />
+          </label>
+          <label className="block text-sm text-slate-500">Payment instructions
+            <span className="block text-xs text-slate-400">Added to emailed invoices (e.g. your bank details for transfers).</span>
+            <textarea value={biz.pay_instructions} onChange={(e) => setBiz({ ...biz, pay_instructions: e.target.value })}
+                      rows={2} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </label>
+          <div className="flex items-center gap-3">
+            <Btn type="submit">Save</Btn>
+            {bizMsg && <span className="text-sm text-emerald-700">{bizMsg}</span>}
+          </div>
+          <p className="text-xs text-slate-400">{me.user.email} · {me.tenant.currency}</p>
+        </form>
       </Card>
       <Card title="SumUp">
         {me.tenant.sumup_connected ? (

@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from server import address, auth, db as db_module, sumup
+from server import address, auth, db as db_module, mail, sumup
 
 DB_PATH = os.environ.get("RINSERUN_DB", "/var/lib/rinserun/app.db")
 LISTEN_HOST = os.environ.get("RINSERUN_HOST", "127.0.0.1")
@@ -157,6 +157,14 @@ def _email_link(conn, user_id: int, email: str, business: str):
     return 200, {"ok": True, "message": "If that account exists, a sign-in link is on its way."}
 
 
+def _tenant_public(tenant: dict) -> dict:
+    settings = json.loads(tenant["settings_json"] or "{}")
+    return {"name": tenant["name"], "currency": tenant["currency"],
+            "sumup_connected": bool(tenant["sumup_api_key"]),
+            "review_url": settings.get("review_url", ""),
+            "pay_instructions": settings.get("pay_instructions", "")}
+
+
 def h_verify(req: Request):
     session = auth.redeem_magic_token(get_db(), req.body.get("token") or "")
     if not session:
@@ -165,16 +173,14 @@ def h_verify(req: Request):
     tenant = _tenant(user)
     return 200, {"session": session,
                  "user": {"name": user["name"], "email": user["email"]},
-                 "tenant": {"name": tenant["name"], "currency": tenant["currency"],
-                            "sumup_connected": bool(tenant["sumup_api_key"])}}
+                 "tenant": _tenant_public(tenant)}
 
 
 def h_me(req: Request):
     user = _require(req)
     tenant = _tenant(user)
     return 200, {"user": {"name": user["name"], "email": user["email"]},
-                 "tenant": {"name": tenant["name"], "currency": tenant["currency"],
-                            "sumup_connected": bool(tenant["sumup_api_key"])}}
+                 "tenant": _tenant_public(tenant)}
 
 
 # -------------------------------------------------------------------- crm --
@@ -500,6 +506,29 @@ def h_invoice_mark_paid(req: Request, iid: int):
     return 200, {"ok": True}
 
 
+def _ensure_checkout_url(tenant: dict, inv: dict) -> str:
+    """Return a SumUp pay-link for an invoice, creating one if needed.
+    Returns '' when SumUp isn't connected or the call fails."""
+    if not tenant["sumup_api_key"]:
+        return ""
+    if inv["sumup_checkout_url"]:
+        return inv["sumup_checkout_url"]
+    try:
+        ck = sumup.create_hosted_checkout(
+            api_key=tenant["sumup_api_key"],
+            merchant_code=tenant["sumup_merchant_code"],
+            amount_pence=inv["amount_pence"], currency=tenant["currency"],
+            reference=f"{tenant['slug']}-{inv['number']}",
+            description=f"{tenant['name']} — {inv['number']}")
+    except sumup.SumUpError as e:
+        log.warning("checkout failed: %s", e)
+        return ""
+    url = ck.get("hosted_checkout_url") or ""
+    db_module.update(get_db(), "invoices", inv["id"], tenant["id"],
+                     {"sumup_checkout_id": ck.get("id"), "sumup_checkout_url": url})
+    return url
+
+
 def h_invoice_checkout(req: Request, iid: int):
     """Create a SumUp hosted checkout for an unpaid invoice."""
     user = _require(req)
@@ -513,22 +542,106 @@ def h_invoice_checkout(req: Request, iid: int):
         return 404, {"error": "invoice not found"}
     if inv["status"] != "unpaid":
         return 409, {"error": f"invoice is {inv['status']}"}
-    if inv["sumup_checkout_url"]:
-        return 200, {"url": inv["sumup_checkout_url"]}
-    try:
-        ck = sumup.create_hosted_checkout(
-            api_key=tenant["sumup_api_key"],
-            merchant_code=tenant["sumup_merchant_code"],
-            amount_pence=inv["amount_pence"], currency=tenant["currency"],
-            reference=f"{tenant['slug']}-{inv['number']}",
-            description=f"{tenant['name']} — {inv['number']}")
-    except sumup.SumUpError as e:
-        log.warning("checkout failed: %s", e)
+    url = _ensure_checkout_url(tenant, inv)
+    if not url:
         return 502, {"error": "SumUp rejected the checkout — check your key in Settings"}
-    url = ck.get("hosted_checkout_url") or ""
-    db_module.update(get_db(), "invoices", iid, user["tenant_id"],
-                     {"sumup_checkout_id": ck.get("id"), "sumup_checkout_url": url})
     return 200, {"url": url}
+
+
+def h_invoice_send(req: Request, iid: int):
+    """Email an invoice to the customer, with a SumUp pay-link if connected,
+    otherwise the tenant's bank/payment instructions."""
+    user = _require(req)
+    tenant = _tenant(user)
+    conn = get_db()
+    inv = db_module.one(conn,
+        "SELECT i.*, c.name AS cust_name, c.email AS cust_email "
+        "FROM invoices i JOIN customers c ON c.id = i.customer_id "
+        "WHERE i.id = ? AND i.tenant_id = ?", (iid, user["tenant_id"]))
+    if not inv:
+        return 404, {"error": "invoice not found"}
+    if not inv["cust_email"]:
+        return 400, {"error": "that customer has no email address"}
+    resend_key = _read_secret(RESEND_KEY_PATH)
+    if not resend_key:
+        return 503, {"error": "email isn't configured on the server"}
+
+    settings = json.loads(tenant["settings_json"] or "{}")
+    amount = f"£{inv['amount_pence'] / 100:.2f}"
+    lines = [f"Hi {inv['cust_name']},", "",
+             f"Here's your invoice {inv['number']} from {tenant['name']} for {amount}.", ""]
+    pay_url = _ensure_checkout_url(tenant, inv)
+    if pay_url:
+        lines += [f"Pay securely by card here: {pay_url}", ""]
+    if settings.get("pay_instructions"):
+        lines += [settings["pay_instructions"], ""]
+    lines += ["Thank you,", tenant["name"]]
+    try:
+        mail.send(resend_key=resend_key, from_addr=FROM_ADDR,
+                  to=inv["cust_email"], reply_to=tenant["email"],
+                  subject=f"{tenant['name']} — invoice {inv['number']} ({amount})",
+                  text="\n".join(lines))
+    except Exception:
+        log.exception("invoice email failed")
+        return 502, {"error": "couldn't send the email — try again"}
+    db_module.insert(conn, "comms_log", {
+        "tenant_id": user["tenant_id"], "customer_id": inv["customer_id"],
+        "kind": "invoice_sent", "content": f"Emailed {inv['number']} to {inv['cust_email']}"})
+    return 200, {"ok": True, "had_pay_link": bool(pay_url)}
+
+
+def h_review_request(req: Request, cid: int):
+    """Email a customer asking for a review (uses the tenant's review link)."""
+    user = _require(req)
+    tenant = _tenant(user)
+    settings = json.loads(tenant["settings_json"] or "{}")
+    review_url = settings.get("review_url")
+    if not review_url:
+        return 400, {"error": "add your review link in Settings first"}
+    cust = db_module.one(get_db(),
+        "SELECT * FROM customers WHERE id = ? AND tenant_id = ?",
+        (cid, user["tenant_id"]))
+    if not cust:
+        return 404, {"error": "customer not found"}
+    if not cust["email"]:
+        return 400, {"error": "that customer has no email address"}
+    resend_key = _read_secret(RESEND_KEY_PATH)
+    if not resend_key:
+        return 503, {"error": "email isn't configured on the server"}
+    text = (f"Hi {cust['name']},\n\nThanks for choosing {tenant['name']}. "
+            f"If you're happy with the windows, a quick review would mean a lot:\n\n"
+            f"{review_url}\n\nThank you,\n{tenant['name']}")
+    try:
+        mail.send(resend_key=resend_key, from_addr=FROM_ADDR,
+                  to=cust["email"], reply_to=tenant["email"],
+                  subject=f"How did we do? — {tenant['name']}", text=text)
+    except Exception:
+        log.exception("review request email failed")
+        return 502, {"error": "couldn't send the email — try again"}
+    db_module.insert(get_db(), "comms_log", {
+        "tenant_id": user["tenant_id"], "customer_id": cid,
+        "kind": "review_request", "content": f"Review request to {cust['email']}"})
+    return 200, {"ok": True}
+
+
+def h_settings_update(req: Request):
+    """Update tenant business settings (name, currency, review link,
+    payment instructions)."""
+    user = _require(req)
+    conn = get_db()
+    tenant = _tenant(user)
+    settings = json.loads(tenant["settings_json"] or "{}")
+    for k in ("review_url", "pay_instructions"):
+        if k in req.body:
+            settings[k] = req.body[k]
+    fields = {"settings_json": json.dumps(settings)}
+    if req.body.get("name"):
+        fields["name"] = req.body["name"].strip()
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(f"UPDATE tenants SET {sets} WHERE id = ?",
+                 (*fields.values(), user["tenant_id"]))
+    conn.commit()
+    return 200, {"ok": True}
 
 
 def h_sumup_sync(req: Request):
@@ -608,6 +721,9 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/invoices$"), h_invoices),
     ("POST", re.compile(r"^/api/invoices/(\d+)/mark-paid$"), h_invoice_mark_paid),
     ("POST", re.compile(r"^/api/invoices/(\d+)/checkout$"), h_invoice_checkout),
+    ("POST", re.compile(r"^/api/invoices/(\d+)/send$"), h_invoice_send),
+    ("POST", re.compile(r"^/api/customers/(\d+)/review-request$"), h_review_request),
+    ("POST", re.compile(r"^/api/settings$"), h_settings_update),
     ("POST", re.compile(r"^/api/sumup/sync$"), h_sumup_sync),
     ("POST", re.compile(r"^/api/sumup/connect$"), h_sumup_connect),
     ("GET",  re.compile(r"^/api/dashboard$"), h_dashboard),
